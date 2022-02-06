@@ -13,7 +13,3 @@ RUN curl -o /usr/local/bin/aws-iam-authenticator https://amazon-eks.s3.us-west-2
 RUN curl -o usr/local/bin/kubectl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && chmod 0755 /usr/local/bin/kubectl
 
 ADD terraform /terraform
-
-
-
-
