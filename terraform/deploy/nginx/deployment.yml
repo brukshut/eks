@@ -70,7 +70,7 @@ spec:
           emptyDir: {}
         - name: scripts
           configMap:
-            name: scripts
+            name: nginx-scripts
             defaultMode: 0555
             items:
             - key: setup.sh
