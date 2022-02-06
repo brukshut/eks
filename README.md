@@ -2,9 +2,9 @@
 
 Provides terraform code to create a simple AWS EKS cluster using the official aws eks terraform module. Also provides a simple `nginx` kubernetes deployment. The terraform code is based off of the [EKS tutorial provided by HashiCorp](https://learn.hashicorp.com/tutorials/terraform/eks).
 
-## Building An EKS Cluster With Terraform
+# Building An EKS Test Cluster With Terraform
 
-This example requires a set of privileged AWS credentials that have administrator access. This ensures the management of all resources created by terraform. 
+This example requires a set of privileged AWS credentials that ensures the management of all resources created by terraform. 
 
 In a production environment, a dedicated role with access to the explicit set of resources required for building EKS clusters should be used.
 
@@ -12,18 +12,20 @@ See [AWS EKS IAM role](https://docs.aws.amazon.com/eks/latest/userguide/service_
 
 ## Building The Docker Image
 
-We will run `terraform` from a debian based docker container.
-
-`bash% docker build -t ekstest:latest .`
-
+Build the `ekstest:latest` docker image.
+```
+bash% docker build -t ekstest:latest .
+```
 ## Run The Docker Image
 
 Once the container is built, we need run the container and configure our AWS credentials. There are several ways to accomplish this. These can be passed as environment variables to docker.
+
+Make sure you remove these from your history file, if needed, when finished.
 ```
 bash% docker run -it \
   -e AWS_ACCESS_KEY_ID=******************** \
   -e AWS_SECRET_ACCESS_KEY=**************************************** \
-  ekstest:latest /bin/bash
+  ekstest:latest -- /bin/bash
 ```
 ## Building EKS Cluster With Terraform
 
@@ -62,8 +64,11 @@ It's not strictly necessary to remove the deployment and the configmap, but this
 ```
 bash% kubectl delete service nginx
 bash% kubectl delete deployment nginx
-bash% kubectl delete configmap scripts
+bash% kubectl delete configmap nginx-scripts
 ```
 ## Running Terraform Destroy
 
-We can use `terraform destroy` to tear down the cluster that we have created. Before we need to do this, we must delete the `nginx` service, which creates a Load Balancer and security group that is attached to the VPC
+We can use `terraform destroy` to tear down the cluster that we have created. Before we need to do this, we must delete the `nginx` service, which creates a Load Balancer and security group that is attached to the VPC.
+```
+bash% terraform destroy --auto-approve
+```
