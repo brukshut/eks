@@ -36,10 +36,12 @@ bash% terraform apply --auto-approve
 ```
 ## Locating The Resulting Kubeconfig File
 
-The eks module builds the cluster and produces a kubeconfig file in the local directory. With the kubeconfig, we can deploy a simple `nginx` application. From the running container, export the `KUBECONFIG` environment variable.
+The eks module builds the cluster and produces a kubeconfig file in the local directory. With the kubeconfig, we can deploy a simple `nginx` application. From the running container, export the `KUBECONFIG` environment variable. 
 ```
 root@b6800197b12d:/# export KUBECONFIG=/terraform/kubeconfig_ekstest-asdf1243
 ```
+In a production environment, access to the control plane must be secured, typically through the use of a VPN.
+
 ## The Nginx Deployment
 
 The `nginx` deployment kubernetes manifests are located in the `deploy` subdirectory of the `terraform` directory. We use `kubectl` to manage these.
@@ -58,15 +60,17 @@ nginx-cdb9fc5b6-wpsfs   1/1     Running   0          5m12s   10.0.2.225   ip-10-
 ```
 ## Accessing The Nginx Deployment
 
-A `LoadBalancer` service is created when we deploy the `nginx` service. You can retrieve the endpoint using `kubectl`.
+A `LoadBalancer` service is created when we deploy the `nginx` service. You can retrieve the elb address using `kubectl`.
 ```
 root@95558170bbe5:/terraform# kubectl get service nginx --no-headers | awk {'print $4'}
 a3b022452b445405783e2e61895c8642-1108080924.us-west-1.elb.amazonaws.com
 ```
-The `nginx` application can be accessed by opening a browser and pointing it to the following `http` endpoint.
+The `nginx` application can be accessed by opening a browser and pointing it to the elb address.
 ```
 http://a3b022452b445405783e2e61895c8642-1108080924.us-west-1.elb.amazonaws.com
 ```
+In a production environment, the use of an SSL certificate and https is obviously preferred.
+
 # Cleaning Up The EKS Cluster
 
 ## Removing The Nginx Service
@@ -81,13 +85,17 @@ bash% kubectl delete configmap nginx-scripts
 ```
 ## Running Terraform Destroy
 
-We can use `terraform destroy` to tear down the cluster that we have created. Before we need to do this, we must delete the `nginx` service, which creates a Load Balancer and security group that is attached to the VPC.
+We can use `terraform destroy` to tear down the cluster that we have created.
 ```
 bash% terraform destroy --auto-approve
 ```
-## Restarting An Exited Container
+## Protecting The Terraform Statefile
 
-Inside the running container, the `/terraform/terraform.tfstate` file describes the AWS resources that the module creates. If you accidentally exit the running container after standing up the cluster, you can restart the last running container in order to run `terraform destroy`.
+Inside the running container, the `/terraform/terraform.tfstate` file describes the AWS resources that the module creates. You will need this file in order to tear down the cluster.
+
+In a production environment, a typical pattern followed to safeguard statefiles is to push them to an encrypted, versioned s3 bucket. This allows shared access to the statefiles across teams.
+
+If you accidentally exit the running container before tearing down the cluster, you can easily restart the last running container in order to retrieve the statefile and run `terraform destroy`.
 ```
 bash% docker start $(docker ps -q -l)
 bash% docker attach $(docker ps -q -l)
