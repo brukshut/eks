@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-scripts
+data:
+  setup.sh: |
+    #!/bin/bash
+
+    INDEX=/usr/share/nginx/html/index.html
+
+    echo "<html><body>" >> $INDEX
+    echo "Pod: ${POD_NAME}<br>" >> $INDEX
+    echo "Node: ${NODE_NAME}<br>" >> $INDEX
+    echo "Namespace: ${POD_NAMESPACE}<br>" >> $INDEX
+    echo "IP: ${POD_IP}<br>" >> $INDEX
+    echo "</body></html>" >> $INDEX
