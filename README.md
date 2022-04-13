@@ -30,9 +30,9 @@ bash% docker run -it \
 
 From the `terraform` directory, run the following commands. 
 ```
-bash% terraform init
-bash% terraform plan
-bash% terraform apply --auto-approve
+root@29e6c98cf177:/terraform# terraform init
+root@29e6c98cf177:/terraform# terraform plan
+root@29e6c98cf177:/terraform# terraform apply --auto-approve
 ```
 ## Locating The Resulting Kubeconfig File
 
@@ -100,3 +100,30 @@ If you accidentally exit the running container before tearing down the cluster, 
 bash% docker start $(docker ps -q -l)
 bash% docker attach $(docker ps -q -l)
 ```
+## Install ingress-nginx
+
+Using `helm`, install `ingress-nginx` ingress controller, enabling metrics endpoint.
+See https://kubernetes.github.io/ingress-nginx/user-guide/monitoring
+```
+bash% kubectl create namespace ingress-nginx
+bash% helm install ingress-nginx ingress-nginx \
+--repo https://kubernetes.github.io/ingress-nginx \
+--namespace ingress-nginx \
+--set controller.metrics.enabled=true \
+--set controller.metrics.serviceMonitor.enabled=true \
+--set controller.metrics.serviceMonitor.additionalLabels.release="kube-prometheus-stack"
+```
+## Installing kube-prometheus-stack
+
+Using `helm`, install the `kube-prometheus-stack` chart, setting `prometheusSpec` values that allow `prometheus` to scrape metrics from pods and services in other namespaces. This is required in order to scrape metrics from the `ingress-nginx` controller pod which runs in `ingress-nginx` namespace.
+```
+bash% helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+bash% helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack
+--set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+```
+## Get Grafana Password
+```
+bash% kubectl get secret --namespace default kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+```
+## Create Ingress
