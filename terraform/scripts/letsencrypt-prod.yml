@@ -5,7 +5,7 @@ metadata:
 spec:
   acme:
     ## email address used for acme registration
-    email: christian@gturn.xyz 
+    email: operator@foo.bar
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
       name: letsencrypt-prod

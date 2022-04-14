@@ -2,18 +2,10 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: tls-ingress
-  annotations:
-    kubernetes.io/ingress.class: nginx
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  tls:
-    - hosts:
-      - grafana.gturn.xyz
-      - hello-world.gturn.xyz
-      secretName: gturntls
-
+  ingressClassName: nginx
   rules:
-  - host: hello-world.gturn.xyz
+  - host: hello-world.foo.bar
     http:
       paths:
       - path: /
@@ -24,7 +16,7 @@ spec:
             port:
               number: 80
 
-  - host: grafana.gturn.xyz
+  - host: grafana.foo.bar
     http:
       paths:
       - pathType: Prefix

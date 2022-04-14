@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx
+  name: helloworld
 spec:
   selector:
-    app: nginx
+    app: helloworld
   ports:
     - port: 80
       targetPort: 80
-  type: LoadBalancer
+  type: ClusterIP 

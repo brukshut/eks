@@ -2,7 +2,7 @@ FROM debian:latest
 
 ARG kubectl_version=1.21.2
 
-RUN apt-get update && apt-get install curl git lsb-release python3 python3-pip software-properties-common vim -y && pip3 install awscli
+RUN apt-get update && apt-get install curl dnsutils jq git lsb-release python3 python3-pip software-properties-common vim -y && pip3 install awscli
 
 RUN curl -fsSL https://apt.releases.hashicorp.com/gpg | apt-key add - && \
     apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" && \
