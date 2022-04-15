@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx
+  name: helloworld
 spec:
   selector:
     matchLabels:
-      app: nginx
+      app: helloworld
   replicas: 3
   template:
     metadata:
       labels:
-        app: nginx
+        app: helloworld
 
     spec:
       initContainers:
@@ -26,7 +26,7 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
-          - name: POD_NAMESPACE
+          - name: NAMESPACE
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
@@ -70,7 +70,7 @@ spec:
           emptyDir: {}
         - name: scripts
           configMap:
-            name: nginx-scripts
+            name: helloworld-scripts
             defaultMode: 0555
             items:
             - key: setup.sh

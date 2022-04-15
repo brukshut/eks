@@ -4,9 +4,7 @@ Provides terraform code to create a simple AWS EKS cluster using the official aw
 
 # Building An EKS Test Cluster With Terraform
 
-This example requires a set of privileged AWS credentials that ensures the management of all resources created by terraform. 
-
-In a production environment, a dedicated role with access to the explicit set of resources required for building EKS clusters should be used.
+This example requires a set of privileged AWS credentials that ensures the management of all resources created by terraform. In a production environment, a dedicated role with access to the explicit set of resources required for building EKS clusters should be used.
 See [AWS EKS IAM role](https://docs.aws.amazon.com/eks/latest/userguide/service_IAM_role.html) for more details.
 
 ## Building The Docker Image
@@ -15,79 +13,234 @@ Build the `ekstest:latest` docker image.
 ```
 bash% docker build -t ekstest:latest .
 ```
-## Run The Docker Image
+## Running The Docker Image
 
-Once the container is built, we need run the container and configure our AWS credentials. There are several ways to accomplish this. These can be passed as environment variables to docker.
-
-Make sure you remove these from your history file, if needed, when finished.
+Once the container is built, we need run the container and configure our AWS credentials. There are several ways to accomplish this. I typically mount my local `~/.aws` directory containing credentials inside the working container.
 ```
-bash% docker run -it \
-  -e AWS_ACCESS_KEY_ID=******************** \
-  -e AWS_SECRET_ACCESS_KEY=**************************************** \
-  ekstest:latest -- /bin/bash
+bash% docker run -it -v ${HOME}/.aws:/root/.aws ekstest:latest /bin/bash
 ```
 ## Building EKS Cluster With Terraform
 
-From the `terraform` directory, run the following commands. 
+From the `/terraform` directory, run the following commands. 
 ```
-bash% terraform init
-bash% terraform plan
-bash% terraform apply --auto-approve
+root@95558170bbe5:/terraform# terraform init
+root@95558170bbe5:/terraform# terraform plan
+root@95558170bbe5:/terraform# terraform apply
 ```
 ## Locating The Resulting Kubeconfig File
 
-The eks module builds the cluster and produces a kubeconfig file in the local directory. With the kubeconfig, we can deploy a simple `nginx` application. From the running container, export the `KUBECONFIG` environment variable. 
+The eks terraform module stands up the cluster, producing a kubeconfig file in the local directory upon completion. Once the kubeconfig is generated, export the `KUBECONFIG` environment variable. 
 ```
 root@b6800197b12d:/# export KUBECONFIG=/terraform/kubeconfig_ekstest-asdf1243
 ```
-In a production environment, access to the control plane must be secured, typically through the use of a VPN.
+## Installing kube-prometheus-stack With Helm
 
-## The Nginx Deployment
-
-The `nginx` deployment kubernetes manifests are located in the `deploy` subdirectory of the `terraform` directory. We use `kubectl` to manage these.
+Using `helm`, install the `kube-prometheus-stack` chart, setting `prometheusSpec` values that allow `prometheus` to scrape metrics from pods and services in other namespaces. This is required in order to scrape metrics from the `ingress-nginx` controller pod which runs in `ingress-nginx` namespace.
 ```
-bash% kubectl apply -f deploy/nginx
+root@95558170bbe5:/terraform# helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+root@95558170bbe5:/terraform# helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+--set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+```
+## Retrieving The Grafana Password
+```
+root@95558170bbe5:/terraform# kubectl get secret --namespace default kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+```
+## Installing ingress-nginx With Helm
+
+Using `helm`, install `ingress-nginx` ingress controller and enable the metrics endpoint. This allows prometheus to scrape the ingress controller for metrics. We need to set
+`additionalLabels.release="[name-of-prometheus-helm-release]"` in order to instruct prometheus to scrape the ingress-nginx controller metrics endpoint.
+
+See https://kubernetes.github.io/ingress-nginx/user-guide/monitoring
+```
+root@95558170bbe5:/terraform# helm upgrade --install ingress-nginx ingress-nginx \
+--repo https://kubernetes.github.io/ingress-nginx \
+--namespace ingress-nginx \
+--create-namespace \
+--set controller.metrics.enabled=true \
+--set controller.metrics.serviceMonitor.enabled=true \
+--set controller.metrics.serviceMonitor.additionalLabels.release="kube-prometheus-stack"
+```
+## Install cert-manager With Helm
+
+Kubernetes ingresses can provide tls termination for backend services. We can leverage cert-manager and Let's Encrypt to easily manage TLS certificates for ingresses. 
+```
+root@95558170bbe5:/terraform# helm repo add jetstack https://charts.jetstack.io
+root@95558170bbe5:/terraform# helm repo update
+root@95558170bbe5:/terraform# helm upgrade --install cert-manager jetstack/cert-manager \
+--namespace cert-manager \
+--create-namespace \
+--version v1.8.0 \
+--set installCRDs=true
+```
+## Create Let's Encrypt Staging And Prod Cluster Issuers
+
+In order to use cert-manager with Let's Encrypt, we need to create `ClusterIssuer` resources. Create the following two yaml files, substituting a valid email address that is responsible for the domains that you manage.
+
+`letsencrypt-prod.yaml`
+```
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    ## email address used for acme registration
+    email: someone@foo.bar
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+```
+`letsencrypt-staging.yaml`
+```
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    ## email address used for acme registration
+    email: someone@foo.bar
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+```
+Create the `ClusterIssuer` resources using `kubectl`.
+```
+root@95558170bbe5:/terraform/scripts# kubectl create -f letsencrypt-prod.yml
+root@95558170bbe5:/terraform/scripts# kubectl create -f letsencrypt-staging.yml
+```
+## Creating DNS CNAMEs For cert-manager And Let's Encrypt
+
+In order to prove that you own the domain for which you are requesting a certificate, Let's Encrypt will send a challenge query to an HTTP endpoint with the requested hostname. If you request a certificate for `foo.bar.info`, Let's Encrypt will look for `http://foo.bar.info/.well-known/acme-challenge/<TOKEN>` before issuing the certificate.
+
+When you create an ingress, the ingress-nginx controller (in a cloud environment) will create an externally facing load balancer. Each hostname that requires a certificate needs a CNAME that points to the CNAME of the load balancer created by the ingress. The hostnames must resolve to the load balancer CNAME.
+
+When you create an tls-enabled ingress that uses cert-manager and Let's Encrypt, the ingress will automatically expose an HTTP endpoint with the challenge response. Let's Encrypt resolves the hostname(s) on the certificate request to the externally facing load balancer and validates the domain, allowing the certificate to be issued successfully.
+```
+root@95558170bbe5:/terraform# kubectl get ingress
+NAME                        CLASS    HOSTS                                     ADDRESS                                                                  PORTS     AGE
+cm-acme-http-solver-6vb4d   nginx    grafana.foo.bar                                                                                                    80        2s
+cm-acme-http-solver-bg29p   nginx    hello-world.foo.bar                                                                                                80        2s
+tls-ingress                 nginx    hello-world.foo.bar,grafana.foo.bar       a807b153dcbdc4dac837ca04e9c702fb-106581610.us-west-1.elb.amazonaws.com   80, 443   30m
+```
+## The helloworld Deployment
+
+The `helloworld` deployment kubernetes manifests are located in the `deploy` subdirectory of the `terraform` directory. We use `kubectl` to manage these.
+```
+root@95558170bbe5:/terraform# kubectl apply -f deploy/helloworld
 ```
 ## Verify That Pods Are Running
 
 Use `kubectl` to verify that the `nginx` pods are running and evenly distributed across the three worker nodes.
 ```
 root@95558170bbe5:/terraform# kubectl get pods -owide
-NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE                                       NOMINATED NODE   READINESS GATES
-nginx-cdb9fc5b6-gg8qc   1/1     Running   0          5m12s   10.0.1.19    ip-10-0-1-90.us-west-1.compute.internal    <none>           <none>
-nginx-cdb9fc5b6-wgqjw   1/1     Running   0          5m12s   10.0.1.192   ip-10-0-1-198.us-west-1.compute.internal   <none>           <none>
-nginx-cdb9fc5b6-wpsfs   1/1     Running   0          5m12s   10.0.2.225   ip-10-0-2-137.us-west-1.compute.internal   <none>           <none>
+NAME                        READY   STATUS    RESTARTS   AGE     IP           NODE                                       NOMINATED NODE   READINESS GATES
+helloworld-cdb9fc5b6-gg8qc  1/1     Running   0          5m12s   10.0.1.19    ip-10-0-1-90.us-west-1.compute.internal    <none>           <none>
+helloworld-cdb9fc5b6-wgqjw  1/1     Running   0          5m12s   10.0.1.192   ip-10-0-1-198.us-west-1.compute.internal   <none>           <none>
+helloworld-cdb9fc5b6-wpsfs  1/1     Running   0          5m12s   10.0.2.225   ip-10-0-2-137.us-west-1.compute.internal   <none>           <none>
 ```
-## Accessing The Nginx Deployment
+## Creating The Ingress Without TLS Enabled
 
-A `LoadBalancer` service is created when we deploy the `nginx` service. You can retrieve the elb address using `kubectl`.
+We can create a non tls-enabled ingress initially, allowing the ingress-nginx controller to allocate a load balancer. Once we have the name of the load balancer, we can create CNAMEs for the hostnames that resolve to the CNAME of the load balancer. Once the CNAMEs are in place, we can then modify the ingress to enable tls. cert-manager and Let's Encrypt will then be able to issue certificates successfully.
 ```
-root@95558170bbe5:/terraform# kubectl get service nginx --no-headers | awk {'print $4'}
-a3b022452b445405783e2e61895c8642-1108080924.us-west-1.elb.amazonaws.com
-```
-The `nginx` application can be accessed by opening a browser and pointing it to the elb address.
-```
-http://a3b022452b445405783e2e61895c8642-1108080924.us-west-1.elb.amazonaws.com
-```
-In a production environment, the use of an SSL certificate and https is obviously preferred.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: hello-world.foo.bar
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: helloworld
+            port:
+              number: 80
 
+  - host: grafana.foo.bar
+    http:
+      paths:
+      - pathType: Prefix
+        path: /
+        backend:
+          service:
+            name: kube-prometheus-stack-grafana
+            port:
+              number: 80
+```              
+```
+root@95558170bbe5:/terraform/deploy/nginx# kubectl create -f ingress.yaml
+```
+## Modifying The Ingress To Enable TLS
+Here is an tls-enabled ingress that uses the `letsencrypt-prod` cert-manager issuer to create certificates signed by Let's Encrypt.
+```
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+      - grafana.foo.bar
+      - hello-world.foo.bar
+      secretName: foobartls
+
+  rules:
+  - host: hello-world.foo.bar
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx
+            port:
+              number: 80
+
+  - host: grafana.foo.bar
+    http:
+      paths:
+      - pathType: Prefix
+        path: /
+        backend:
+          service:
+            name: kube-prometheus-stack-grafana
+            port:
+              number: 80
+```
+```
+root@95558170bbe5:/terraform/deploy/nginx# kubectl apply -f tls-ingress.yaml
+```
 # Cleaning Up The EKS Cluster
 
-## Removing The Nginx Service
+## Removing Ingresses
 
-Before we tear down the cluster, we need to remove the `nginx` kubernetes service that we created earlier. This service creates an AWS ELB and security group that are attached to the VPC that is created when we build the cluster. `terraform` will not be able to tear down the cluster until we remove these components.
-
-It's not strictly necessary to remove the deployment and the configmap, but this is good housekeeping.
+ingress-nginx will create load balancers and security groups that need to be removed before we can tear down the EKS cluster. We need to delete any ingresses that we have created, and also remove the ingress-nginx helm chart.
 ```
-bash% kubectl delete service nginx
-bash% kubectl delete deployment nginx
-bash% kubectl delete configmap nginx-scripts
+root@95558170bbe5:/terraform# kubectl delete ingress test-ingress
+root@95558170bbe5:/terraform# helm uninstall -n ingress-nginx ingress-nginx
 ```
 ## Running Terraform Destroy
 
-We can use `terraform destroy` to tear down the cluster that we have created.
+From the `/terraform` directory, use `terraform destroy` to tear down the cluster after 
 ```
-bash% terraform destroy --auto-approve
+root@95558170bbe5:/terraform# terraform destroy --auto-approve
 ```
 ## Protecting The Terraform Statefile
 

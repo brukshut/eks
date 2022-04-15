@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helloworld-scripts
+data:
+  setup.sh: |
+    #!/bin/bash
+
+    cat << EOF > /usr/share/nginx/html/index.html
+    <html><body>
+      <style>
+      .mytable tbody td {
+        color: #333;
+        font: 8pt verdana;
+        padding: 2px 10px 2px 10px;
+      }
+      </style>
+      <div align="center"><h1 style="font: 32pt verdana">Hello, World!</h1></div>
+      <table class="mytable" align="center">
+        <tbody>
+          <tr><td>Pod</td><td>$POD_NAME</td></tr>
+          <tr><td>Pod IP</td><td>$POD_IP</td></tr>
+          <tr><td>Namespace</td><td>$NAMESPACE</td></tr>
+          <tr><td>Node</td><td>$NODE_NAME</td></tr>
+        </tbody>
+      </table>
+    </body></html>
+    EOF
